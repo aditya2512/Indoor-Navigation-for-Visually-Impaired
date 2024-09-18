@@ -317,6 +317,7 @@ void loop() {
          
           current_state = STATE_POLL;
         } else {
+          received = false;
           receiver(TYPICAL_RX_TIMEOUT);
         }
       } else {

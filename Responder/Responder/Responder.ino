@@ -71,7 +71,10 @@ char myDevID = 1;
 unsigned int seq;
 uint64_t RespTs;
 Ranging thisRange;
-int dist;
+uint32_t dist;
+int32_t dist_ss;
+int32_t dist_ss2;
+uint32_t dist_avg_formula;
 char login_device;
 
 //UWB State Machine
@@ -248,6 +251,7 @@ void loop() {
       rx_resp_msg[SRC_IDX] = myDevID;
       rx_resp_msg[SEQ_IDX] = seq & 0xFF;
       rx_resp_msg[SEQ_IDX + 1] = seq >> 8;
+      //delay(35);
       generic_send(rx_resp_msg, sizeof(rx_resp_msg), POLL_MSG_POLL_TX_TS_IDX, SEND_DELAY_FIXED);
   
       while (!sendComplete);
@@ -286,6 +290,12 @@ void loop() {
             thisRange.FinalTxTime = DW1000Time((int64_t)FinalTxTime_64);
     
             dist = thisRange.calculateRange();
+            dist_ss = thisRange.calculateSSRange();
+            dist_ss2 = thisRange.calculateSSRange2();
+            dist_avg_formula = thisRange.calculateAvgTWRRange();
+            char buf2[60];
+            sprintf(buf2, "Packet:%d,%d,%d,%d,%d,0", recvd_resp_seq, dist_ss, dist_ss2, dist_avg_formula, dist);
+            Serial.println(buf2);
     
             if (DebugUWB_L1 == 1) {
               char buf[60];

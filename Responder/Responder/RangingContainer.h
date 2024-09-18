@@ -48,11 +48,119 @@ class Ranging {
       uint32_t out = (uint32_t)(ToF_microseconds * SPEED_OF_LIGHT / 1000);
       //Serial.print("Output: ");
       //Serial.println(output);
-      print_all_time_fast(out);
+      //print_all_time_fast(out);
       return out;
 
     }
 
+    int32_t calculateSSRange() {
+      Ra = (RespRxTime - PollTxTime).wrap();
+      Rb = (FinalRxTime - RespTxTime).wrap();
+      Da = (FinalTxTime - RespRxTime).wrap();
+      Db = (RespTxTime - PollRxTime).wrap();
+      /*
+        Serial.print("Ra = ");
+        Serial.println(Ra);
+        Serial.print("Rb = ");
+        Serial.println(Rb);
+
+        Serial.print("Da = ");
+        Serial.println(Da);
+        Serial.print("Db = ");
+        Serial.println(Db);
+      */
+      //printAll();
+      DW1000Time ToF;
+      ToF = (Ra-Db)/2;
+
+      //        float ToF_float = ((Ra.getAsMicroSeconds()*Rb.getAsMicroSeconds())-(Da.getAsMicroSeconds()*Db.getAsMicroSeconds()))/(Ra.getAsMicroSeconds()+Rb.getAsMicroSeconds()+Da.getAsMicroSeconds()+Db.getAsMicroSeconds());
+      //        Serial.println(ToF_float*SPEED_OF_LIGHT/1000);
+
+      //Serial.print("ToF: ");
+      //Serial.println(ToF);
+      float ToF_microseconds = ToF.getAsMicroSeconds();
+      //        Serial.print("ToF_microseconds: ");
+      //        Serial.println(ToF_microseconds);
+      int32_t out = (int32_t)(ToF_microseconds * SPEED_OF_LIGHT / 1000);
+      //Serial.print("Output: ");
+      //Serial.println(output);
+      //print_all_time_fast(out);
+      return out;
+      
+    }
+
+    int32_t calculateSSRange2() {
+      Ra = (RespRxTime - PollTxTime).wrap();
+      Rb = (FinalRxTime - RespTxTime).wrap();
+      Da = (FinalTxTime - RespRxTime).wrap();
+      Db = (RespTxTime - PollRxTime).wrap();
+      /*
+        Serial.print("Ra = ");
+        Serial.println(Ra);
+        Serial.print("Rb = ");
+        Serial.println(Rb);
+
+        Serial.print("Da = ");
+        Serial.println(Da);
+        Serial.print("Db = ");
+        Serial.println(Db);
+      */
+      //printAll();
+      DW1000Time ToF;
+      ToF = (Rb-Da)/2;
+
+      //        float ToF_float = ((Ra.getAsMicroSeconds()*Rb.getAsMicroSeconds())-(Da.getAsMicroSeconds()*Db.getAsMicroSeconds()))/(Ra.getAsMicroSeconds()+Rb.getAsMicroSeconds()+Da.getAsMicroSeconds()+Db.getAsMicroSeconds());
+      //        Serial.println(ToF_float*SPEED_OF_LIGHT/1000);
+
+      //Serial.print("ToF: ");
+      //Serial.println(ToF);
+      float ToF_microseconds = ToF.getAsMicroSeconds();
+      //        Serial.print("ToF_microseconds: ");
+      //        Serial.println(ToF_microseconds);
+      int32_t out = (int32_t)(ToF_microseconds * SPEED_OF_LIGHT / 1000);
+      //Serial.print("Output: ");
+      //Serial.println(output);
+      //print_all_time_fast(out);
+      return out;
+      
+    }
+
+    uint32_t calculateAvgTWRRange() {
+      Ra = (RespRxTime - PollTxTime).wrap();
+      Rb = (FinalRxTime - RespTxTime).wrap();
+      Da = (FinalTxTime - RespRxTime).wrap();
+      Db = (RespTxTime - PollRxTime).wrap();
+      /*
+        Serial.print("Ra = ");
+        Serial.println(Ra);
+        Serial.print("Rb = ");
+        Serial.println(Rb);
+
+        Serial.print("Da = ");
+        Serial.println(Da);
+        Serial.print("Db = ");
+        Serial.println(Db);
+      */
+      //printAll();
+      DW1000Time ToF;
+      ToF = ((Ra-Db) + (Rb-Da))/4;
+
+      //        float ToF_float = ((Ra.getAsMicroSeconds()*Rb.getAsMicroSeconds())-(Da.getAsMicroSeconds()*Db.getAsMicroSeconds()))/(Ra.getAsMicroSeconds()+Rb.getAsMicroSeconds()+Da.getAsMicroSeconds()+Db.getAsMicroSeconds());
+      //        Serial.println(ToF_float*SPEED_OF_LIGHT/1000);
+
+      //Serial.print("ToF: ");
+      //Serial.println(ToF);
+      float ToF_microseconds = ToF.getAsMicroSeconds();
+      //        Serial.print("ToF_microseconds: ");
+      //        Serial.println(ToF_microseconds);
+      uint32_t out = (uint32_t)(ToF_microseconds * SPEED_OF_LIGHT / 1000);
+      //Serial.print("Output: ");
+      //Serial.println(output);
+      //print_all_time_fast(out);
+      return out;
+    }
+
+    
     void initialize() {
       PollTxTime.setTimestamp((int64_t)0);
       PollRxTime.setTimestamp((int64_t)0);
