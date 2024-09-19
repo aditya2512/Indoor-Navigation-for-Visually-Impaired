@@ -29,6 +29,7 @@ int DebugUWB_L1 = 0;
 int DebugUWB_L2 = 0;
 int DebugWebserverComms = 1;
 int DebugCrypto = 1;
+int DebugUWB_LRXTO = 0;
 
 //NeoPixel
 // Which pin on the Arduino is connected to the NeoPixels?
@@ -202,6 +203,9 @@ void handleRxTO() {
   RX_TO_COUNT++;
   //Serial.println("RXTO");
   RxTimeout = true;
+  if (DebugUWB_LRXTO == 1) {
+    printState();
+  }
 }
 
 
@@ -289,10 +293,11 @@ void loop() {
             any_msg_get_ts(&rx_packet[FINAL_MSG_FINAL_TX_TS_IDX], &FinalTxTime_64);
             thisRange.FinalTxTime = DW1000Time((int64_t)FinalTxTime_64);
     
-            dist = thisRange.calculateRange();
-            dist_ss = thisRange.calculateSSRange();
-            dist_ss2 = thisRange.calculateSSRange2();
-            dist_avg_formula = thisRange.calculateAvgTWRRange();
+            dist = thisRange.calculateRange(); //Decawave Formula - Use this one!
+            dist_avg_formula = thisRange.calculateAvgTWRRange(); //Drift influences if Da and Db are not equal
+            dist_ss = thisRange.calculateSSRange(); //Drift not compensated
+            dist_ss2 = thisRange.calculateSSRange2(); //Drift not compensated, other direction
+            
             char buf2[60];
             sprintf(buf2, "Packet:%d,%d,%d,%d,%d,0", recvd_resp_seq, dist_ss, dist_ss2, dist_avg_formula, dist);
             Serial.println(buf2);
@@ -348,6 +353,24 @@ void loop() {
 }
 
 //Other support functions
+void printState() {
+  switch(current_state){
+    case STATE_IDLE: Serial.println("STATE_IDLE"); break;
+    case STATE_POLL: Serial.println("STATE_POLL"); break;
+    case STATE_RESP_EXPECTED: Serial.println("STATE_RESP_EXPECTED"); break;
+    case STATE_FINAL_SEND: Serial.println("STATE_FINAL_SEND"); break;
+    case STATE_TWR_DONE: Serial.println("STATE_TWR_DONE"); break;
+    case STATE_RESP_SEND: Serial.println("STATE_RESP_SEND"); break;
+    case STATE_FINAL_EXPECTED: Serial.println("STATE_FINAL_EXPECTED");break;
+    case STATE_OTHER_POLL_EXPECTED: Serial.println("STATE_OTHER_POLL_EXPECTED");break;
+    case STATE_RESP_PENDING: Serial.println("STATE_RESP_PENDING"); break;
+    case STATE_DIST_EST_EXPECTED: Serial.println("STATE_DIST_EST_EXPECTED");break;
+    case STATE_DIST_EST_SEND: Serial.println("STATE_DIST_EST_SEND"); break;
+    case STATE_RECEIVE: Serial.println("STATE_RECEIVE"); break;
+    default: Serial.print("Unknown State: "); Serial.println(current_state); break;
+  }
+}
+
 
 #ifdef __arm__
 // should use uinstd.h to define sbrk but Due causes a conflict

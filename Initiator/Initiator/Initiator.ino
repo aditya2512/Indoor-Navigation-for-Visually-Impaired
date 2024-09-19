@@ -29,6 +29,7 @@ int DebugUWB_L1 = 0;
 int DebugUWB_L2 = 0;
 int DebugWebserverComms = 1;
 int DebugCrypto = 1;
+int DebugUWB_LRXTO = 0;
 
 //UWB Globals
 const uint8_t PIN_RST = 9; // reset pin
@@ -178,6 +179,9 @@ void handleRxTO() {
   RX_TO_COUNT++;
   if (DebugUWB_L1 == 1) {
     Serial.println("RXTO");
+  }
+  if (DebugUWB_LRXTO == 1) {
+    printState();
   }
   RxTimeout = true;
 }
@@ -335,6 +339,24 @@ void loop() {
 }
 
 //Other support functions
+
+void printState() {
+  switch(current_state){
+    case STATE_IDLE: Serial.println("STATE_IDLE"); break;
+    case STATE_POLL: Serial.println("STATE_POLL"); break;
+    case STATE_RESP_EXPECTED: Serial.println("STATE_RESP_EXPECTED"); break;
+    case STATE_FINAL_SEND: Serial.println("STATE_FINAL_SEND"); break;
+    case STATE_TWR_DONE: Serial.println("STATE_TWR_DONE"); break;
+    case STATE_RESP_SEND: Serial.println("STATE_RESP_SEND"); break;
+    case STATE_FINAL_EXPECTED: Serial.println("STATE_FINAL_EXPECTED");break;
+    case STATE_OTHER_POLL_EXPECTED: Serial.println("STATE_OTHER_POLL_EXPECTED");break;
+    case STATE_RESP_PENDING: Serial.println("STATE_RESP_PENDING"); break;
+    case STATE_DIST_EST_EXPECTED: Serial.println("STATE_DIST_EST_EXPECTED");break;
+    case STATE_DIST_EST_SEND: Serial.println("STATE_DIST_EST_SEND"); break;
+    case STATE_RECEIVE: Serial.println("STATE_RECEIVE"); break;
+    default: Serial.print("Unknown State: "); Serial.println(current_state); break;                
+  }
+}
 
 #ifdef __arm__
 // should use uinstd.h to define sbrk but Due causes a conflict
