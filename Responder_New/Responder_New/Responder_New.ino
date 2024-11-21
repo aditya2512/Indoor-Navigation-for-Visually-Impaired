@@ -88,7 +88,7 @@ volatile uint8_t current_state = STATE_IDLE;
 int RX_TO_COUNT = 0;
 
 
-const int BroadCastID = 0xFF;
+const int BroadCastID = 0xF0;
 
 //UWB Support Functions
 void receiver(uint16_t rxtoval = 0 ) {
@@ -174,7 +174,13 @@ void handleReceived() {
 
   DW1000.getData(rx_packet, DW1000.getDataLength());
   //  Serial.println("Received something...");
-  received = true;
+  // if (rx_packet[DST_IDX]==BroadCastID){
+    received = true;
+    Serial.println(rx_packet[DST_IDX]);
+  //}
+  // else{
+  //   received=false;
+  // }
 
 //  byte2char(rx_packet, 24);
 //  Serial.println(rx_msg_char);
@@ -215,12 +221,26 @@ void loop() {
   
   switch(current_state) {
     case STATE_IDLE:
-      break;
+    {
+      if(received== true){
+         if (rx_packet[DST_IDX] == BroadCastID && rx_packet[0] == POLL_MSG_TYPE) {
+           current_state= STATE_RECEIVE;
+      }
+      }
+      else{
+        break;
+      }
+    }
+    
     case STATE_RECEIVE:
     {
+      
       if (received == true)
       {
-        
+       Serial.println("Initiating the next state receive"); 
+       
+       //delay(100);
+       
         if (DebugUWB_L1 == 1) {
           Serial.println("State: STATE_RECEIVE");
         }
@@ -228,10 +248,12 @@ void loop() {
         pixels.setPixelColor(0, pixels.Color(255, 0, 0));
         pixels.setBrightness(50);
         pixels.show();*/
-  
+          received=false;
+          Serial.println(rx_packet[DST_IDX]);
         //Check the message type and take action accordingly.
         if (rx_packet[DST_IDX] == BroadCastID && rx_packet[0] == POLL_MSG_TYPE) {
-          received = false;
+          Serial.println("Ok so we got a poll message from Initiator");
+          
           seq = rx_packet[SEQ_IDX] +  ((uint16_t)rx_packet[SEQ_IDX + 1] << 8);
           //Send response after saving current information.
           uint64_t PollTxTime_64 = 0L;
@@ -244,19 +266,28 @@ void loop() {
           //Change state so that a response can be sent soon.
           current_state = STATE_RESP_SEND;     
         }
+        else
+        {
+          
+          received=false;
+          setup();
+        }
       }
+      
       break;
     }
+
     case STATE_RESP_SEND:
     {
       if (DebugUWB_L1 == 1) {
         Serial.println("State: STATE_RESP_SEND");
       }
-      rx_resp_msg[DST_IDX] = rx_packet[SRC_IDX];
+      rx_resp_msg[DST_IDX] = 0;//rx_packet[SRC_IDX];
       rx_resp_msg[SRC_IDX] = myDevID;
       rx_resp_msg[SEQ_IDX] = seq & 0xFF;
       rx_resp_msg[SEQ_IDX + 1] = seq >> 8;
       //delay(35);
+      Serial.println("So I am sending back a response to Initator to see if FINAL starts");
       generic_send(rx_resp_msg, sizeof(rx_resp_msg), POLL_MSG_POLL_TX_TS_IDX, SEND_DELAY_FIXED);
   
       while (!sendComplete);
@@ -272,12 +303,13 @@ void loop() {
     {
       if (received == true)
       {
-        
+        received = false;
+        Serial.println("Ok so the FINAL sequence has been initiated and it's my turn to send distance measurements!");
         if (DebugUWB_L1 == 1) {
           Serial.println("State: STATE_FINAL_EXPECTED");
         }
         if (rx_packet[DST_IDX] == BroadCastID && rx_packet[0] == FINAL_MSG_TYPE) {
-          received = false;
+          
           unsigned int recvd_resp_seq = rx_packet[SEQ_IDX] +  ((uint16_t)rx_packet[SEQ_IDX + 1] << 8);
           if (recvd_resp_seq == seq) {
             //pixels.clear(); // Set all pixel colors to 'off'
@@ -312,6 +344,7 @@ void loop() {
             current_state = STATE_DIST_EST_SEND;
           }
         } else {
+          //received=false
           current_state = STATE_RECEIVE;
           receiver(TYPICAL_RX_TIMEOUT);
         }
@@ -342,17 +375,26 @@ void loop() {
 //      pixels.setBrightness(50);
 //      pixels.show();
 
-      current_state=STATE_RECEIVE;
+      // Explicitly reset to receive state and prepare for next poll
+      current_state = STATE_RECEIVE;
+      //received = false;  // Reset received flag
       receiver(TYPICAL_RX_TIMEOUT);
       break;
+      }
+  
+    default:
+      // Handle unknown states
+      Serial.println("Unknown state. Resetting to STATE_IDLE.");
+      current_state = STATE_RECEIVE;
+      break;
     }
-  }
   if (RxTimeout == true) {
     RxTimeout = false;
     current_state = STATE_RECEIVE;
     receiver(TYPICAL_RX_TIMEOUT);
   }
 }
+
 
 //Other support functions
 void printState() {

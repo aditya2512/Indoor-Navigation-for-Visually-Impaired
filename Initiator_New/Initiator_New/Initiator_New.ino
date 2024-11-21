@@ -63,7 +63,7 @@ uint64_t RespTs;
 Ranging thisRange;
 int dist;
 int attempt=0;
-#define MAX_ATTEMPTS 100
+#define MAX_ATTEMPTS 10
 
 //UWB State Machine
 typedef enum states {STATE_IDLE, STATE_POLL, STATE_RESP_EXPECTED, STATE_FINAL_SEND, STATE_TWR_DONE, STATE_RESP_SEND, STATE_FINAL_EXPECTED, STATE_OTHER_POLL_EXPECTED, STATE_RESP_PENDING, STATE_DIST_EST_EXPECTED, STATE_DIST_EST_SEND, STATE_TIGHT_LOOP,
@@ -76,8 +76,9 @@ int RX_TO_COUNT = 0;
 int BEEP_PIN = 6;
 
 const int myArray[2] = {0xFF,0xF0};
-int BroadCastID;
 int my_index = 0;
+int BroadCastID=myArray[my_index];
+
 
 void setup() {
   Serial.begin(115200);
@@ -194,6 +195,7 @@ void handleRxTO() {
 
 void loop() {
   int recvd_resp_seq;
+
   
   //Take actions based on the current state
   switch(current_state) {
@@ -201,12 +203,14 @@ void loop() {
       break;
     case STATE_POLL:
     {
-      /*if (attempt>MAX_ATTEMPTS) {
-        Serial.println("---Could Not communicate with token device---");
-        current_state=STATE_IDLE;
-        digitalWrite(BEEP_PIN, 1);
-        delay(500);
-        //digitalWrite(6, 0);
+      // if (attempt > MAX_ATTEMPTS) {
+      //   Serial.println("---Could Not communicate with token device---");
+      //   current_state = STATE_IDLE;
+      //   // Error handling code...
+      //   attempt = 0;
+      //   // Consider adding a way to restart or continue
+      //   }
+        /*digitalWrite(6, 0);
         //digitalWrite(12, 0);
         digitalWrite(BEEP_PIN, 0);
         delay(50);
@@ -221,8 +225,8 @@ void loop() {
         attempt = 0;
         break;
       }*/
-      BroadCastID = myArray[my_index];
-      my_index = 1 - my_index;
+      
+      delay(200);
       if (DebugUWB_L1 == 1) {
         Serial.println("State: STATE_POLL");
       }
@@ -232,7 +236,7 @@ void loop() {
       tx_poll_msg[SEQ_IDX] = seq & 0xFF;
       tx_poll_msg[SEQ_IDX + 1] = seq >> 8;
       generic_send(tx_poll_msg, sizeof(tx_poll_msg), POLL_MSG_POLL_TX_TS_IDX, SEND_DELAY_FIXED);
-
+      //delay(500);
       current_state = STATE_RESP_EXPECTED;
 
       while (!sendComplete) {
@@ -254,7 +258,8 @@ void loop() {
       //Handle multiple UWB responders later.
       if (received) {
         
-        if (rx_packet[DST_IDX] == myDevID && rx_packet[0] == RESP_MSG_TYPE) {
+        if (rx_packet[DST_IDX] == myDevID
+         && rx_packet[0] == RESP_MSG_TYPE) {
           received = false;
             if (DebugUWB_L1 == 1) {
               Serial.println("Recieved response!");
@@ -274,7 +279,8 @@ void loop() {
             receiver(TYPICAL_RX_TIMEOUT);
         }
       } else {
-        Serial.println("We are timing out at this device!!");
+        //Serial.println("We are timing out at this device!!");
+        //current_state = STATE_POLL;
         if (RxTimeout == true) {
           if (DebugUWB_L1 == 1 || DebugUWB_L2 == 1) {
             Serial.println("RX TO");
@@ -291,6 +297,7 @@ void loop() {
       if (DebugUWB_L1 == 1) {
         Serial.println("State: STATE_FINAL_SEND");
       }
+      
       tx_final_msg[SRC_IDX] = myDevID;
       tx_final_msg[DST_IDX] = BroadCastID;
       tx_final_msg[SEQ_IDX] = seq & 0xFF;
@@ -313,9 +320,9 @@ void loop() {
       //Check if the token is near enough
       if (received == true)
       {
-        
+        received = false;
         if (rx_packet[DST_IDX] == myDevID && rx_packet[0] == DIST_EST_MSG_TYPE) {
-          received = false;
+          
           long dist;
           dist = rx_packet[DIST_EST_MSG_DIST_MEAS_IDX];
           dist |= rx_packet[DIST_EST_MSG_DIST_MEAS_IDX+1]<<8;
@@ -324,9 +331,31 @@ void loop() {
           Serial.print(millis());
           Serial.print(": Distance: ");
           Serial.println(dist);
-          //digitalWrite(BEEP_PIN, 1);
-          //delay(100);
-          //digitalWrite(BEEP_PIN, 0);
+          Serial.println(BroadCastID);
+          
+          if (dist<1000){
+            // digitalWrite(BuzzerPin, High)
+            // delay(1000)
+            // digitalWrite(BuzzerPin, Low)
+          Serial.print("The Device which is closest is: ");
+          Serial.println(rx_packet[SRC_IDX]);
+          if (rx_packet[SRC_IDX]==1){
+          digitalWrite(11, HIGH);
+          delay(1000);
+          digitalWrite(11, LOW);
+          }
+          else if (rx_packet[SRC_IDX]==2)
+          {
+          digitalWrite(11, HIGH);
+          delay(2000);
+          digitalWrite(11, LOW);
+          }
+          }
+
+          BroadCastID = myArray[my_index];
+          my_index = 1 - my_index;
+          Serial.println(BroadCastID);
+          
          
           current_state = STATE_POLL;
         } else {
@@ -334,13 +363,18 @@ void loop() {
           receiver(TYPICAL_RX_TIMEOUT);
         }
       } else {
-        if (RxTimeout == true) {
+        // In STATE_DIST_EST_EXPECTED case, modify the timeout handling
+          if (RxTimeout == true) {
           if (DebugUWB_L1 == 1 || DebugUWB_L2 == 1) {
-            Serial.println("RX TO");
-          }
+              Serial.println("RX TO");
+            }
           RxTimeout = false;
-          current_state = STATE_POLL; //Need a max try and give up
-        }
+          current_state = STATE_POLL; 
+          attempt++;
+    
+    // Optional: Add a configurable retry mechanism
+    // Could add a maximum retry count or a delay before retrying
+      }
       }
       break;
     }
