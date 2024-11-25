@@ -44,6 +44,32 @@ volatile boolean sendComplete = false;
 volatile boolean RxTimeout = false;
 String message;
 
+#define MAX_RESPONDERS 10  // Maximum number of responders to track
+#define RESPONSE_TIMEOUT 100  // Time to wait for all responses in milliseconds
+#define BUZZER_PIN 6        // Pin connected to buzzer
+#define RANGE_THRESHOLD 1000 // Distance threshold in mm (1 meter)
+#define BEEP_DURATION 100   // Duration of each beep in ms
+
+// Structure to track responder information
+struct ResponderInfo {
+    char deviceId;
+    uint64_t respTs;
+    long distance;
+    bool hasResponded;
+    uint16_t lastSeq;
+};
+
+struct ResponderDistance {
+    char id;
+    long distance;
+    bool valid;
+};
+
+// Global variables for tracking responders
+ResponderInfo responders[MAX_RESPONDERS];
+int numActiveResponders = 0;
+unsigned long responseStartTime = 0;
+
 //UWB Messages
 byte tx_poll_msg[MAX_POLL_LEN] = {POLL_MSG_TYPE, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 byte rx_resp_msg[MAX_RESP_LEN] = {RESP_MSG_TYPE, 0x02, 0, 0, 0, 0};
@@ -54,7 +80,7 @@ byte rx_send_keys_ack[MAX_KEYS_TYPE_LEN] = {SEND_KEYS_ACK_TYPE, 0, 0, 0, 0, 0, 0
 int response_counter = 0;
 char rx_msg_char[200];
 byte rx_packet[128];
-char myDevID=0;
+char myDevID=2;
 
 //UWB Ranging
 unsigned int seq;
@@ -66,7 +92,7 @@ int attempt=0;
 #define MAX_ATTEMPTS 100
 
 //UWB State Machine
-typedef enum states {STATE_IDLE, STATE_POLL, STATE_RESP_EXPECTED, STATE_FINAL_SEND, STATE_TWR_DONE, STATE_RESP_SEND, STATE_FINAL_EXPECTED, STATE_OTHER_POLL_EXPECTED, STATE_RESP_PENDING, STATE_DIST_EST_EXPECTED, STATE_DIST_EST_SEND, STATE_TIGHT_LOOP,
+typedef enum states {STATE_IDLE, STATE_POLL, STATE_COLLECTING_RESPONSES,    STATE_FINAL_SEND_LOOP, STATE_DIST_EST_COLLECTION, STATE_RESP_EXPECTED, STATE_FINAL_SEND, STATE_TWR_DONE, STATE_RESP_SEND, STATE_FINAL_EXPECTED, STATE_OTHER_POLL_EXPECTED, STATE_RESP_PENDING, STATE_DIST_EST_EXPECTED, STATE_DIST_EST_SEND, STATE_TIGHT_LOOP,
                      STATE_RECEIVE, STATE_PRESYNC, STATE_SYNC, STATE_ANCHOR, STATE_TAG, STATE_FIRST_START, STATE_OBLIVION, STATE_ACK_EXPECTED, STATE_SEND_KEY_IV, STATE_KEY_IV_ACK_EXPECTED
                     } STATES;
 volatile uint8_t current_state = STATE_IDLE;
@@ -119,6 +145,12 @@ void setup() {
   DW1000.attachReceiveFailedHandler(handleError);
   DW1000.attachErrorHandler(handleError);
   DW1000.attachSentHandler(handleSent);
+  // Initialize responder tracking
+    numActiveResponders = 0;
+    for(int i = 0; i < MAX_RESPONDERS; i++) {
+        responders[i].hasResponded = false;
+        responders[i].distance = 0;
+    }
   current_state = STATE_POLL;
 }
 
@@ -186,6 +218,45 @@ void handleRxTO() {
   RxTimeout = true;
 }
 
+void resetResponders() {
+    for(int i = 0; i < MAX_RESPONDERS; i++) {
+        responders[i].hasResponded = false;
+        responders[i].distance = 0;
+    }
+}
+
+void addOrUpdateResponder(char deviceId) {
+    // Check if responder already exists
+    for(int i = 0; i < numActiveResponders; i++) {
+        if(responders[i].deviceId == deviceId) {
+            return;  // Responder already known
+        }
+    }
+    
+    // Add new responder if space available
+    if(numActiveResponders < MAX_RESPONDERS) {
+        responders[numActiveResponders].deviceId = deviceId;
+        responders[numActiveResponders].hasResponded = false;
+        responders[numActiveResponders].distance = 0;
+        numActiveResponders++;
+    }
+}
+
+// Add this function to find the closest responder
+ResponderDistance getClosestResponder(ResponderInfo responders[], int numActiveResponders) {
+    ResponderDistance closest = {0, LONG_MAX, false};
+    
+    for(int i = 0; i < numActiveResponders; i++) {
+        if(responders[i].hasResponded && responders[i].distance > 0) {
+            if(responders[i].distance < closest.distance) {
+                closest.id = responders[i].deviceId;
+                closest.distance = responders[i].distance;
+                closest.valid = true;
+            }
+        }
+    }
+    return closest;
+}
 
 
 void loop() {
@@ -220,6 +291,10 @@ void loop() {
       if (DebugUWB_L1 == 1) {
         Serial.println("State: STATE_POLL");
       }
+
+    // Reset all responder states for new ranging round
+      resetResponders();
+
       seq++;
       tx_poll_msg[SRC_IDX] = myDevID;
       tx_poll_msg[DST_IDX] = BROADCAST_ID;
@@ -227,19 +302,143 @@ void loop() {
       tx_poll_msg[SEQ_IDX + 1] = seq >> 8;
       generic_send(tx_poll_msg, sizeof(tx_poll_msg), POLL_MSG_POLL_TX_TS_IDX, SEND_DELAY_FIXED);
 
-      current_state = STATE_RESP_EXPECTED;
+      //current_state = STATE_RESP_EXPECTED;
 
       while (!sendComplete) {
       };
-      if (DebugUWB_L1 == 1) {
-        Serial.println("Poll out");
-      }
-
-      //current_time_us = get_time_us();
-      sendComplete = false;
+      sendComplete= false;
+      // Start collecting responses
+      responseStartTime = millis();
+      current_state = STATE_COLLECTING_RESPONSES;
       receiver(TYPICAL_RX_TIMEOUT);
+      // if (DebugUWB_L1 == 1) {
+      //   Serial.println("Poll out");
+      // }
+
+      // //current_time_us = get_time_us();
+      // sendComplete = false;
+      // receiver(TYPICAL_RX_TIMEOUT);
       break;
     }
+
+    case STATE_COLLECTING_RESPONSES: {
+            if (received) {
+                received = false;
+                if (rx_packet[0] == RESP_MSG_TYPE) {
+                    recvd_resp_seq = rx_packet[SEQ_IDX] + ((uint16_t)rx_packet[SEQ_IDX + 1] << 8);
+                    char responderId = rx_packet[SRC_IDX];
+                    
+                    if(recvd_resp_seq == seq) {
+                        // Store response timestamp for this responder
+                        DW1000Time rxTS;
+                        DW1000.getReceiveTimestamp(rxTS);
+                        
+                        // Find or add responder
+                        addOrUpdateResponder(responderId);
+                        
+                        // Update responder information
+                        for(int i = 0; i < numActiveResponders; i++) {
+                            if(responders[i].deviceId == responderId) {
+                                responders[i].respTs = rxTS.getTimestamp();
+                                responders[i].hasResponded = true;
+                                responders[i].lastSeq = seq;
+                                break;
+                            }
+                        }
+                        
+                        // Continue receiving more responses// add if condition to check how many responses received
+                        // if (i>= MAX_RESPONDERS){
+                        //   serial.println("Maximum_respomses_received");
+                        // }
+
+                        receiver(TYPICAL_RX_TIMEOUT);
+                    }
+                }
+            }
+            
+            // Check if we should move to sending finals
+            if (millis() - responseStartTime >= RESPONSE_TIMEOUT) {
+                current_state = STATE_FINAL_SEND_LOOP;
+                currentDeviceIndex = 0;  // Start with first responder
+            } else if (RxTimeout) {
+                RxTimeout = false;
+                receiver(TYPICAL_RX_TIMEOUT);
+            }
+            break;
+        }
+        
+        case STATE_FINAL_SEND_LOOP: {
+            // Send final messages to each responder that responded
+            while(currentDeviceIndex < numActiveResponders) {
+                if(responders[currentDeviceIndex].hasResponded) {
+                    tx_final_msg[SRC_IDX] = myDevID;
+                    tx_final_msg[DST_IDX] = responders[currentDeviceIndex].deviceId;
+                    tx_final_msg[SEQ_IDX] = seq & 0xFF;
+                    tx_final_msg[SEQ_IDX + 1] = seq >> 8;
+                    any_msg_set_ts(&tx_final_msg[FINAL_MSG_RESP_RX_TS_IDX], 
+                                 responders[currentDeviceIndex].respTs);
+                    
+                    FIXED_DELAY = 4;
+                    generic_send(tx_final_msg, MAX_FINAL_LEN, FINAL_MSG_FINAL_TX_TS_IDX, 
+                               SEND_DELAY_FIXED);
+                    
+                    while (!sendComplete) {};
+                    sendComplete = false;
+                }
+                currentDeviceIndex++;
+            }
+            
+            current_state = STATE_DIST_EST_COLLECTION;
+            responseStartTime = millis();  // Reset timer for distance collection
+            receiver(TYPICAL_RX_TIMEOUT);
+            break;
+        }
+
+    case STATE_DIST_EST_COLLECTION: {
+    if (received) {
+        received = false;
+        if (rx_packet[DST_IDX] == myDevID && rx_packet[0] == DIST_EST_MSG_TYPE) {
+            char responderId = rx_packet[SRC_IDX];
+            long dist;
+            dist = rx_packet[DIST_EST_MSG_DIST_MEAS_IDX];
+            dist |= rx_packet[DIST_EST_MSG_DIST_MEAS_IDX+1]<<8;
+            dist |= rx_packet[DIST_EST_MSG_DIST_MEAS_IDX+2]<<16;
+            dist |= rx_packet[DIST_EST_MSG_DIST_MEAS_IDX+3]<<24;
+            
+            
+            // Store distance for this responder
+            for(int i = 0; i < numActiveResponders; i++) {
+                if(responders[i].deviceId == responderId) {
+                    responders[i].distance = dist;
+                    // Play audio feedback for this responder
+                    playRangeAudio(responderId, dist);
+                    break;
+                }
+            }
+            receiver(TYPICAL_RX_TIMEOUT);
+        }
+    }
+    
+    // Move to next polling cycle after timeout
+    if (millis() - responseStartTime >= RESPONSE_TIMEOUT) {
+        // Find and print the closest responder
+        ResponderDistance closest = getClosestResponder(responders, numActiveResponders);
+        if(closest.valid) {
+            Serial.print(millis());
+            Serial.print(": Closest Responder ID: ");
+            Serial.print(closest.id);
+            Serial.print(" Distance: ");
+            Serial.print(closest.distance);
+            Serial.println(" mm");
+        }
+        current_state = STATE_POLL;
+    } else if (RxTimeout) {
+        RxTimeout = false;
+        receiver(TYPICAL_RX_TIMEOUT);
+    }
+    break;
+}
+
     case STATE_RESP_EXPECTED: {
       if (DebugUWB_L1 == 1) {
         Serial.println("State: STATE_RESP_EXPECTED");
@@ -281,8 +480,14 @@ void loop() {
     case STATE_FINAL_SEND:
     {
       if (DebugUWB_L1 == 1) {
-        Serial.println("State: STATE_FINAL_SEND");
-      }
+    Serial.println("---DEBUG: Entering STATE_FINAL_SEND---");
+    Serial.print("Current Sequence Number: ");
+    Serial.println(seq);
+    Serial.print("Destination Device Index: ");
+    Serial.println(currentDeviceIndex);
+    Serial.print("My Device ID: ");
+    Serial.println(myDevID);
+  }
       tx_final_msg[SRC_IDX] = myDevID;
       tx_final_msg[DST_IDX] = currentDeviceIndex;
       tx_final_msg[SEQ_IDX] = seq & 0xFF;
@@ -356,6 +561,35 @@ void printState() {
     case STATE_RECEIVE: Serial.println("STATE_RECEIVE"); break;
     default: Serial.print("Unknown State: "); Serial.println(current_state); break;                
   }
+}
+
+// Add this function to generate different audio patterns for different responders
+void playRangeAudio(char deviceId, long distance) {
+    if (distance <= RANGE_THRESHOLD) {
+        switch(deviceId) {
+            case 1:  // First responder pattern
+                digitalWrite(BUZZER_PIN, HIGH);
+                delay(BEEP_DURATION);
+                digitalWrite(BUZZER_PIN, LOW);
+                delay(BEEP_DURATION);
+                break;
+                
+            case 2:  // Second responder pattern
+                for(int i = 0; i < 2; i++) {
+                    digitalWrite(BUZZER_PIN, HIGH);
+                    delay(BEEP_DURATION);
+                    digitalWrite(BUZZER_PIN, LOW);
+                    delay(BEEP_DURATION/2);
+                }
+                break;
+                
+            default: // Default pattern for unknown devices
+                digitalWrite(BUZZER_PIN, HIGH);
+                delay(BEEP_DURATION * 2);
+                digitalWrite(BUZZER_PIN, LOW);
+                break;
+        }
+    }
 }
 
 #ifdef __arm__

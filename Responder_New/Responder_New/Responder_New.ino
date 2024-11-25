@@ -270,7 +270,6 @@ void loop() {
         {
           
           received=false;
-          setup();
         }
       }
       

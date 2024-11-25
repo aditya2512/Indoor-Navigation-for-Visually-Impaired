@@ -57,16 +57,27 @@ volatile boolean sendComplete = false;
 volatile boolean RxTimeout = false;
 String message;
 
+// Add unique device IDs for each responder
+const char RESPONDER_1_ID = 1;
+const char RESPONDER_2_ID = 2;
+// Change this value for each responder
+const char MY_DEVICE_ID = RESPONDER_2_ID;  // Set to RESPONDER_1_ID or RESPONDER_2_ID
+
 //UWB Messages
 byte tx_poll_msg[MAX_POLL_LEN] = {POLL_MSG_TYPE, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-byte rx_resp_msg[MAX_RESP_LEN] = {RESP_MSG_TYPE, 0x02, 0, 0, 0, 0};
+//byte rx_resp_msg[MAX_RESP_LEN] = {RESP_MSG_TYPE, 0x02, 0, 0, 0, 0};
 byte tx_final_msg[MAX_FINAL_LEN] = {FINAL_MSG_TYPE, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-byte rx_dist_msg[MAX_DIST_LEN] = {DIST_EST_MSG_TYPE, 0, 0, 0, 0, 0, 0};
-byte tx_key_ack[MAX_POLL_LEN] = {SEND_KEYS_ACK_TYPE, 0, 0, 0, 0, 0, 0};
+//byte rx_dist_msg[MAX_DIST_LEN] = {DIST_EST_MSG_TYPE, 0, 0, 0, 0, 0, 0};
+//byte tx_key_ack[MAX_POLL_LEN] = {SEND_KEYS_ACK_TYPE, 0, 0, 0, 0, 0, 0};
 int response_counter = 0;
 char rx_msg_char[200];
 byte rx_packet[128];
-char myDevID = 1;
+//char myDevID = 1;
+
+// Modified message structures to include device identification
+byte rx_resp_msg[MAX_RESP_LEN] = {RESP_MSG_TYPE, MY_DEVICE_ID, 0, 0, 0, 0};
+byte rx_dist_msg[MAX_DIST_LEN] = {DIST_EST_MSG_TYPE, MY_DEVICE_ID, 0, 0, 0, 0, 0};
+byte tx_key_ack[MAX_POLL_LEN] = {SEND_KEYS_ACK_TYPE, MY_DEVICE_ID, 0, 0, 0, 0, 0};
 
 //UWB Ranging
 unsigned int seq;
@@ -90,18 +101,17 @@ int RX_TO_COUNT = 0;
 
 
 
-//UWB Support Functions
-void receiver(uint16_t rxtoval = 0 ) {
-  received = false;
-  DW1000.newReceive();
-  DW1000.setDefaults();
-  DW1000.receivePermanently(false);
-  if (rxtoval > 0) {
-    DW1000.setRxTimeout(rxtoval);
-  } else {
-    DW1000.setRxTimeout(rxtoval);
-  }
-  DW1000.startReceive();
+// Modify the receiver() function to ensure proper initialization
+void receiver(uint16_t rxtoval = 0) {
+    received = false;
+    RxTimeout = false;  // Reset timeout flag
+    DW1000.newReceive();
+    DW1000.setDefaults();
+    DW1000.receivePermanently(false);
+    if (rxtoval > 0) {
+        DW1000.setRxTimeout(rxtoval);
+    }
+    DW1000.startReceive();
 }
 
 
@@ -133,8 +143,12 @@ void setup() {
   // general configuration
   DW1000.newConfiguration();
   DW1000.setDefaults();
-  DW1000.setDeviceAddress(6);
+  //DW1000.setDeviceAddress(6);
+  //DW1000.setNetworkId(10);
+  // Set unique device address for each responder
+  DW1000.setDeviceAddress(MY_DEVICE_ID);
   DW1000.setNetworkId(10);
+
   DW1000.enableMode(DW1000.MODE_LONGDATA_RANGE_LOWPOWER);
   DW1000.commitConfiguration();
   Serial.println(F("Committed configuration ..."));
@@ -156,7 +170,16 @@ void setup() {
   DW1000.attachSentHandler(handleSent);
 
   current_state = STATE_RECEIVE;
-  receiver(TYPICAL_RX_TIMEOUT);
+  // Initialize receiver with proper timeout
+    //current_state = STATE_RECEIVE;
+    DW1000.newReceive();
+    DW1000.setDefaults();
+    DW1000.receivePermanently(false);
+    DW1000.setRxTimeout(TYPICAL_RX_TIMEOUT);
+    DW1000.startReceive();
+    
+    // Enable interrupt
+    DW1000.attachReceivedHandler(handleReceived);
   
 }
 
@@ -216,46 +239,45 @@ void loop() {
   switch(current_state) {
     case STATE_IDLE:
       break;
-    case STATE_RECEIVE:
-    {
-      if (received == true)
-      {
-        received = false;
-        if (DebugUWB_L1 == 1) {
-          Serial.println("State: STATE_RECEIVE");
+    case STATE_RECEIVE: {
+            if (received == true) {
+                received = false;
+                if (DebugUWB_L1 == 1) {
+                    Serial.println("State: STATE_RECEIVE");
+                }
+
+                // Check if the message is meant for broadcast or specifically for this device
+                if ((rx_packet[DST_IDX] == BROADCAST_ID || rx_packet[DST_IDX] == MY_DEVICE_ID) 
+                    && rx_packet[0] == POLL_MSG_TYPE) {
+                    seq = rx_packet[SEQ_IDX] + ((uint16_t)rx_packet[SEQ_IDX + 1] << 8);
+                    
+                    uint64_t PollTxTime_64 = 0L;
+                    any_msg_get_ts(&rx_packet[POLL_MSG_POLL_TX_TS_IDX], &PollTxTime_64);
+                    thisRange.PollTxTime = DW1000Time((int64_t)PollTxTime_64);
+                    DW1000Time rxTS;
+                    DW1000.getReceiveTimestamp(rxTS);
+                    thisRange.PollRxTime = rxTS;
+                    
+                    // Add random delay before responding to avoid collision
+                    delay(MY_DEVICE_ID * 10);  // Different delay for each responder
+                    current_state = STATE_RESP_SEND;
+                }
+            }
+            break;
         }
-        /*pixels.clear(); // Set all pixel colors to 'off'
-        pixels.setPixelColor(0, pixels.Color(255, 0, 0));
-        pixels.setBrightness(50);
-        pixels.show();*/
-  
-        //Check the message type and take action accordingly.
-        if (rx_packet[DST_IDX] == BROADCAST_ID && rx_packet[0] == POLL_MSG_TYPE) {
-          seq = rx_packet[SEQ_IDX] +  ((uint16_t)rx_packet[SEQ_IDX + 1] << 8);
-          //Send response after saving current information.
-          uint64_t PollTxTime_64 = 0L;
-          any_msg_get_ts(&rx_packet[POLL_MSG_POLL_TX_TS_IDX], &PollTxTime_64);
-          thisRange.PollTxTime = DW1000Time((int64_t)PollTxTime_64);
-          DW1000Time rxTS;
-          DW1000.getReceiveTimestamp(rxTS);
-          thisRange.PollRxTime = rxTS;
-          seq = rx_packet[SEQ_IDX] +  ((uint16_t)rx_packet[SEQ_IDX + 1] << 8);
-          //Change state so that a response can be sent soon.
-          current_state = STATE_RESP_SEND;     
-        }
-      }
-      break;
-    }
     case STATE_RESP_SEND:
     {
       if (DebugUWB_L1 == 1) {
         Serial.println("State: STATE_RESP_SEND");
       }
       rx_resp_msg[DST_IDX] = rx_packet[SRC_IDX];
-      rx_resp_msg[SRC_IDX] = myDevID;
+      rx_resp_msg[SRC_IDX] = MY_DEVICE_ID;  // Use unique responder ID
       rx_resp_msg[SEQ_IDX] = seq & 0xFF;
       rx_resp_msg[SEQ_IDX + 1] = seq >> 8;
-      //delay(35);
+      
+      // Add small random delay to avoid collision with other responder
+      delay(random(5, 15));
+      
       generic_send(rx_resp_msg, sizeof(rx_resp_msg), POLL_MSG_POLL_TX_TS_IDX, SEND_DELAY_FIXED);
   
       while (!sendComplete);
@@ -267,6 +289,7 @@ void loop() {
       receiver(TYPICAL_RX_TIMEOUT);
       break;
     }
+
     case STATE_FINAL_EXPECTED:
     {
       if (received == true)
@@ -275,7 +298,12 @@ void loop() {
         if (DebugUWB_L1 == 1) {
           Serial.println("State: STATE_FINAL_EXPECTED");
         }
-        if (rx_packet[0] == FINAL_MSG_TYPE) {
+        if (rx_packet[0] == FINAL_MSG_TYPE && rx_packet[DST_IDX]==MY_DEVICE_ID) {
+
+          if (DebugUWB_L1 == 1) {
+              Serial.println("Recieved Final message:"); Serial.print(MY_DEVICE_ID);
+            }
+          //Check the final message for the dST_IDX
           unsigned int recvd_resp_seq = rx_packet[SEQ_IDX] +  ((uint16_t)rx_packet[SEQ_IDX + 1] << 8);
           if (recvd_resp_seq == seq) {
             //pixels.clear(); // Set all pixel colors to 'off'
@@ -316,34 +344,35 @@ void loop() {
       }
       break;
     }
-    case STATE_DIST_EST_SEND:
-    {
-      if (DebugUWB_L1 == 1) {
-        Serial.println("State: STATE_DIST_EST_SEND");
-      }
-      rx_dist_msg[DST_IDX] = rx_packet[SRC_IDX];
-      login_device = rx_packet[SRC_IDX];
-      rx_dist_msg[SRC_IDX] = myDevID;
-      rx_dist_msg[SEQ_IDX] = seq & 0xFF;
-      rx_dist_msg[SEQ_IDX + 1] = seq >> 8;
-      rx_dist_msg[DIST_EST_MSG_DIST_MEAS_IDX] = dist&0xFF;
-      rx_dist_msg[DIST_EST_MSG_DIST_MEAS_IDX+1] = (dist >> 8)&0xFF;
-      rx_dist_msg[DIST_EST_MSG_DIST_MEAS_IDX+2] = (dist >> 16)&0xFF;
-      rx_dist_msg[DIST_EST_MSG_DIST_MEAS_IDX+3] = (dist >> 24)&0xFF;
-      
-      generic_send(rx_dist_msg, sizeof(rx_dist_msg), POLL_MSG_POLL_TX_TS_IDX, SEND_DELAY_FIXED);
-      while (!sendComplete);
-      sendComplete = false;
-      
-//      pixels.clear(); // Set all pixel colors to 'off'
-//      pixels.setPixelColor(0, pixels.Color(0, 255, 0));
-//      pixels.setBrightness(50);
-//      pixels.show();
-
-      current_state=STATE_RECEIVE;
-      receiver(TYPICAL_RX_TIMEOUT);
-      break;
-    }
+    case STATE_DIST_EST_SEND: {
+            if (DebugUWB_L1 == 1) {
+                Serial.println("State: STATE_DIST_EST_SEND");
+            }
+            
+            // Include device ID in distance estimation message
+            rx_dist_msg[DST_IDX] = rx_packet[SRC_IDX];
+            rx_dist_msg[SRC_IDX] = MY_DEVICE_ID;  // Use unique device ID
+            rx_dist_msg[SEQ_IDX] = seq & 0xFF;
+            rx_dist_msg[SEQ_IDX + 1] = seq >> 8;
+            rx_dist_msg[DIST_EST_MSG_DIST_MEAS_IDX] = dist & 0xFF;
+            rx_dist_msg[DIST_EST_MSG_DIST_MEAS_IDX+1] = (dist >> 8) & 0xFF;
+            rx_dist_msg[DIST_EST_MSG_DIST_MEAS_IDX+2] = (dist >> 16) & 0xFF;
+            rx_dist_msg[DIST_EST_MSG_DIST_MEAS_IDX+3] = (dist >> 24) & 0xFF;
+            
+            // Modified debug output to include device ID
+            char buf2[60];
+            sprintf(buf2, "Responder:%d,Packet:%d,%d,%d,%d,%d,0", 
+                MY_DEVICE_ID, seq, dist_ss, dist_ss2, dist_avg_formula, dist);
+            Serial.println(buf2);
+            
+            generic_send(rx_dist_msg, sizeof(rx_dist_msg), POLL_MSG_POLL_TX_TS_IDX, SEND_DELAY_FIXED);
+            while (!sendComplete);
+            sendComplete = false;
+            
+            current_state = STATE_RECEIVE;
+            receiver(TYPICAL_RX_TIMEOUT);
+            break;
+        }
   }
   if (RxTimeout == true) {
     RxTimeout = false;
