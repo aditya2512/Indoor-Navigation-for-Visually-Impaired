@@ -22,16 +22,10 @@ It enables:
 
 ---
 
-## 🧠 System Architecture
+##  System Architecture
 
-+---------------+ +-------------------+ +----------------+
-| UWB Anchor | <----> | UWB Tag (on user) | ---> | Processing Unit |
-+---------------+ +-------------------+ +----------------+
-|
-v
-+----------------------+
-| Audio Feedback System |
-+----------------------+
+| UWB Anchor | <----> | UWB Tag (on user) | ---> | Processing Unit | ---> | Audio Feedback System |
+
 
 ---
 
@@ -56,9 +50,9 @@ Indoor-Navigation-for-Visually-Impaired/
 └── README.md # Project documentation
 
 
-## 🔧 Setup Instructions
+## Setup Instructions
 
-1. **Clone the Repository**
+ **Clone the Repository**
 
 - git clone https://github.com/aditya2512/Indoor-Navigation-for-Visually-Impaired.git
 - cd Indoor-Navigation-for-Visually-Impaired
